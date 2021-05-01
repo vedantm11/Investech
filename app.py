@@ -17,14 +17,11 @@ import metadata_parser
 #Function to filter company data
 @st.cache(show_spinner=False, suppress_st_warning=True)
 def filter_company_data(df_company, esg_categories, start, end):
-    #Filter E,S,G Categories
     comps = []
     for i in esg_categories:
         X = df_company[df_company[i] == True]
         comps.append(X)
     df_company = pd.concat(comps)
-    # df_company = df_company[(df_company.DATE >= start) &
-    #                         (df_company.DATE <= end)]
     df_company = df_company[df_company.DATE.between(start, end)]
     return df_company
 
@@ -40,5 +37,10 @@ def load_data(start_data, end_data):
     companies = data["data"].Organization.sort_values().unique().tolist()
     companies.insert(0,"Select a Company")
     return data, companies
+
+def filter_on_date(df, start, end, date_col="DATE"):
+    df = df[(df[date_col] >= pd.to_datetime(start)) &
+            (df[date_col] <= pd.to_datetime(end))]
+    return df
 
 

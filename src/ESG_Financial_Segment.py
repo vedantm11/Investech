@@ -1,4 +1,4 @@
-
+# Databricks notebook source
 import os
 from pprint import pprint
 import pandas as pd
@@ -8,26 +8,7 @@ from pyspark.sql import Window
 import sys
 import datetime
 
-def get_col_avgs(df):
-    exclude = [k for k, v in df.dtypes if v in ["date", "timestamp", "string"]]
-    avgs = df.select([F.avg(c).alias(c) for c in df.columns if c not in exclude]).collect()[0]
-    return {c: avgs[c] for c in df.columns if c not in exclude}
-
-def forward_fill(df, sort_col, fill_col):
-
-    window = Window.orderBy(sort_col).rowsBetween(-sys.maxsize, 0)
-    df = df.withColumn(fill_col, F.last(fill_col, ignorenulls=True).over(window))
-    return df
-  
-
-def fill_dates(sdf, min_date, max_date, date_col="date"):
-    date_df = spark.createDataFrame([[d.date()] for d in 
-                  pd.date_range(min_date, max_date)], [date_col])
-    sdf = date_df.join(sdf, on=date_col, how="left").orderBy(F.col(date_col).asc())
-    for col in [c for c in sdf.columns if c != date_col]:
-        sdf = forward_fill(sdf, date_col, col)
-    sdf = sdf.withColumn(date_col, F.col(date_col).cast("date"))
-    return sdf
+# COMMAND ----------
 
 def show_df_rounded(df, places=4, rows=20):
     dtypes = {k: v for k, v in df.dtypes}
@@ -43,8 +24,29 @@ def show_df_rounded(df, places=4, rows=20):
     show_cols = [c for c in show_cols]
     df.select(*show_cols).limit(rows).show()
 
+# COMMAND ----------
+
+def forward_fill(df, sort_col, fill_col):
+    # Forward fill
+    window = Window.orderBy(sort_col).rowsBetween(-sys.maxsize, 0)
+    df = df.withColumn(fill_col, F.last(fill_col, ignorenulls=True).over(window))
+    return df
+  
+
+def fill_dates(sdf, min_date, max_date, date_col="date"):
+    """ Add all days in a date range then forward fill. """
+    # Get all the dates between min and max and add to dataframe
+    date_df = spark.createDataFrame([[d.date()] for d in 
+                  pd.date_range(min_date, max_date)], [date_col])
+    sdf = date_df.join(sdf, on=date_col, how="left").orderBy(F.col(date_col).asc())
+    for col in [c for c in sdf.columns if c != date_col]:
+        sdf = forward_fill(sdf, date_col, col)
+    sdf = sdf.withColumn(date_col, F.col(date_col).cast("date"))
+    return sdf
+
 
 def daily_tone(filtered_df, name):
+    """ """
     colname = f"{name.replace(' ', '_')}_tone"
     tone_df = (filtered_df.groupby(F.date_format("DATE", "y-MM-dd").alias("date"))
                           .agg((F.sum("Tone") / F.sum("WordCount")).alias(colname))
@@ -55,19 +57,32 @@ def daily_tone(filtered_df, name):
               )
     return tone_df
 
+# COMMAND ----------
+
 def subtract_cols(df, col1, col2):
     df = (df.withColumn(col1, df[f"{col1}"] - df[f"{col2}"])
             .withColumnRenamed(col1, col1.replace("_tone", "_diff")))
     return df
 
 
+def get_col_avgs(df):
+    exclude = [k for k, v in df.dtypes if v in ["date", "timestamp", "string"]]
+    avgs = df.select([F.avg(c).alias(c) for c in df.columns if c not in exclude]).collect()[0]
+    return {c: avgs[c] for c in df.columns if c not in exclude}
+
+# COMMAND ----------
+
 def make_tables(start_date, end_date):
+    """
+    """
+    # Directories
     org_types = f"Russell_top_{Fields.n_orgs}"
     base_dir = f"dbfs:/mnt/esg/financial_report_data/GDELT_data_{org_types}"
     range_save_dir = os.path.join(base_dir, f"{start_date}__to__{end_date}")
     esg_dir = os.path.join(range_save_dir, "esg_scores")
     dbutils.fs.mkdirs(esg_dir)
     
+    # Load data
     data_path = os.path.join(range_save_dir, "data_as_delta")
     try:
         data = (spark.read.format("delta")
@@ -80,18 +95,18 @@ def make_tables(start_date, end_date):
         print("Data for these dates hasn't been generated!!!")
         return
 
-    
+    # Get all organizations
     print("Finding all Organizations")
     organizations = [x.Organization for x in data.select(
                      "Organization").distinct().collect()]
     
-    
+    # Get the overall tone
     print("Calculating Tones Over Time")
     overall_tone = daily_tone(data, "industry")
     esg_tones = {L: daily_tone(data.filter(f"{L} == True"), "industry")
                  for L in ["E", "S", "G"]}
     
-    
+    # Loop through the organizations to get the average daily tone for each company
     pct_idxs = range(0, len(organizations), len(organizations) // 10)
     for i, org in enumerate(organizations):
         if i in pct_idxs:
@@ -110,7 +125,7 @@ def make_tables(start_date, end_date):
                                          tone_label, "industry_tone")            
     del data   
     
-    
+    # Average to get overall scores
     print("Computing Overall Scores")
     scores = {}
     overall_scores = get_col_avgs(overall_tone)
@@ -122,23 +137,23 @@ def make_tables(start_date, end_date):
         scores[org]["T"] = overall_scores[diff_label]
       
       
-    
+    # Save all the tables
     print("Saving Tables")  
     
-    
+    # Overall ESG
     print("    Daily Overall ESG")
     path = os.path.join(esg_dir, "overall_daily_esg_scores.csv").replace("dbfs:/", "/dbfs/")
     pd_df = overall_tone.toPandas().set_index("date").sort_index().asfreq(freq="D", method="ffill")
     pd_df.to_csv(path, index=True)
     
-    
+    # E, S, and G
     for L, tdf in esg_tones.items():
         print("    Daily " + L)
         path = os.path.join(esg_dir, f"daily_{L}_score.csv").replace("dbfs:/", "/dbfs/")
         pd_df = tdf.toPandas().set_index("date").sort_index().asfreq(freq="D", method="ffill")
         pd_df.to_csv(path, index=True)
 
-    
+    # Averaged scores
     print("    Average Scores")
     score_path = path = os.path.join(esg_dir, "average_esg_scores.csv").replace("dbfs:/", "/dbfs/")
     pd.DataFrame(scores).to_csv(score_path, index=True)

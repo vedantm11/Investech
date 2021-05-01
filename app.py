@@ -11,19 +11,32 @@ import plotly.express as px
 from plot_setup import finastra_theme
 from download_data import Data
 import sys
+
 import metadata_parser
 
-
-#Function to filter company data
+####### CACHED FUNCTIONS ######
 @st.cache(show_spinner=False, suppress_st_warning=True)
 def filter_company_data(df_company, esg_categories, start, end):
+    #Filter E,S,G Categories
     comps = []
     for i in esg_categories:
         X = df_company[df_company[i] == True]
         comps.append(X)
     df_company = pd.concat(comps)
+    # df_company = df_company[(df_company.DATE >= start) &
+    #                         (df_company.DATE <= end)]
     df_company = df_company[df_company.DATE.between(start, end)]
     return df_company
+
+
+@st.cache(show_spinner=False, suppress_st_warning=True,
+          allow_output_mutation=True)
+def load_data(start_data, end_data):
+    data = Data().read(start_data, end_data)
+    companies = data["data"].Organization.sort_values().unique().tolist()
+    companies.insert(0,"Select a Company")
+    return data, companies
+
 
 @st.cache(show_spinner=False,suppress_st_warning=True)
 def filter_publisher(df_company,publisher):
@@ -31,17 +44,6 @@ def filter_publisher(df_company,publisher):
         df_company = df_company[df_company['SourceCommonName'] == publisher]
     return df_company
 
-@st.cache(show_spinner=False, suppress_st_warning=True,allow_output_mutation=True)
-def load_data(start_data, end_data):
-    data = Data().read(start_data, end_data)
-    companies = data["data"].Organization.sort_values().unique().tolist()
-    companies.insert(0,"Select a Company")
-    return data, companies
-
-def filter_on_date(df, start, end, date_col="DATE"):
-    df = df[(df[date_col] >= pd.to_datetime(start)) &
-            (df[date_col] <= pd.to_datetime(end))]
-    return df
 
 def get_melted_frame(data_dict, frame_names, keepcol=None, dropcol=None):
     if keepcol:
@@ -55,6 +57,13 @@ def get_melted_frame(data_dict, frame_names, keepcol=None, dropcol=None):
     df.columns = ["DATE", "ESG", "Score"]
     return df.reset_index(drop=True)
 
+
+def filter_on_date(df, start, end, date_col="DATE"):
+    df = df[(df[date_col] >= pd.to_datetime(start)) &
+            (df[date_col] <= pd.to_datetime(end))]
+    return df
+
+
 def get_clickable_name(url):
     try:
         T = metadata_parser.MetadataParser(url=url, search_head_only=True)
@@ -65,29 +74,33 @@ def get_clickable_name(url):
 
 
 def main(start_data, end_data):
-    #Theme
+    ###### CUSTOMIZE COLOR THEME ######
     alt.themes.register("finastra", finastra_theme)
     alt.themes.enable("finastra")
     violet, fuchsia = ["#694ED6", "#C137A2"]
 
-    #Page setup
+
+    ###### SET UP PAGE ######
     icon_path = os.path.join(".", "raw", "esg_ai_logo.png")
-    st.set_page_config(page_title="ESG AI", page_icon=icon_path,
+    st.set_page_config(page_title="INVESTECH", page_icon=icon_path,
                        layout='centered', initial_sidebar_state="collapsed")
     _, logo, _ = st.beta_columns(3)
     logo.image(icon_path, width=200)
     style = ("text-align:center; padding: 0px; font-family: arial black;, "
              "font-size: 400%")
-    title = f"<h1 style='{style}'>ESG<sup>AI</sup></h1><br><br>"
+    title = f"<h1 style='{style}'>INVESTECH</h1><br><br>"
     st.write(title, unsafe_allow_html=True)
 
-    #Load data
+
+    ###### LOAD DATA ######
     with st.spinner(text="Fetching Data..."):
         data, companies = load_data(start_data, end_data)
     df_conn = data["conn"]
     df_data = data["data"]
     embeddings = data["embed"]
 
+
+    ####### CREATE SIDEBAR CATEGORY FILTER######
     st.sidebar.title("Filter Options")
     date_place = st.sidebar.empty()
     esg_categories = st.sidebar.multiselect("Select News Categories",
@@ -95,9 +108,14 @@ def main(start_data, end_data):
     pub = st.sidebar.empty()
     num_neighbors = st.sidebar.slider("Number of Connections", 1, 20, value=8)
 
-    #After company selection
+
+
+
+
+    ###### RUN COMPUTATIONS WHEN A COMPANY IS SELECTED ######
     company = st.selectbox("Select a Company to Analyze", companies)
     if company and company != "Select a Company":
+        ###### FILTER ######
         df_company = df_data[df_data.Organization == company]
         diff_col = f"{company.replace(' ', '_')}_diff"
         esg_keys = ["E_score", "S_score", "G_score"]
@@ -107,25 +125,17 @@ def main(start_data, end_data):
         ind_tone_df = get_melted_frame(data, ["overall_score"],
                                        dropcol="industry_tone")
 
-    company = st.selectbox("Select a Company to Analyze", companies)
-    if company and company != "Select a Company":
-        df_company = df_data[df_data.Organization == company]
-        diff_col = f"{company.replace(' ', '_')}_diff"
-        esg_keys = ["E_score", "S_score", "G_score"]
-        esg_df = get_melted_frame(data, esg_keys, keepcol=diff_col)
-        ind_esg_df = get_melted_frame(data, esg_keys, dropcol="industry_tone")
-        tone_df = get_melted_frame(data, ["overall_score"], keepcol=diff_col)
-        ind_tone_df = get_melted_frame(data, ["overall_score"],
-                                       dropcol="industry_tone")
 
-        #Date UI
+        ###### DATE WIDGET ######
         start = df_company.DATE.min()
         end = df_company.DATE.max()
         selected_dates = date_place.date_input("Select a Date Range",
             value=[start, end], min_value=start, max_value=end, key=None)
-        time.sleep(0.8)  
+        time.sleep(0.8)  #Allow user some time to select the two dates -- hacky :D
         start, end = selected_dates
-        #Data filter
+
+
+        ###### FILTER DATA ######
         df_company = filter_company_data(df_company, esg_categories,
                                          start, end)
         esg_df = filter_on_date(esg_df, start, end)
@@ -135,12 +145,14 @@ def main(start_data, end_data):
         date_filtered = filter_on_date(df_data, start, end)
 
 
+        ###### PUBLISHER SELECT BOX ######
         publishers = df_company.SourceCommonName.sort_values().unique().tolist()
         publishers.insert(0, "all")
         publisher = pub.selectbox("Select Publisher", publishers)
         df_company = filter_publisher(df_company, publisher)
 
 
+        ###### DISPLAY DATA ######
         URL_Expander = st.beta_expander(f"View {company.title()} Data:", True)
         URL_Expander.write(f"### {len(df_company):,d} Matching Articles for " +
                            company.title())
@@ -151,13 +163,14 @@ def main(start_data, end_data):
         ####
         URL_Expander.write(f"#### Sample Articles")
         link_df = df_company[["DATE", "URL"]].head(3).copy()
+        # link_df["URL"] = link_df["URL"].apply(lambda R: f"[{R}]({R})")
         link_df["ARTICLE"] = link_df.URL.apply(get_clickable_name)
         link_df = link_df[["DATE", "ARTICLE"]].to_markdown(index=False)
         URL_Expander.markdown(link_df)
         ####
 
 
-
+        ###### CHART: METRIC OVER TIME ######
         st.markdown("---")
         col1, col2 = st.beta_columns((1, 3))
 
@@ -167,7 +180,7 @@ def main(start_data, end_data):
         line_metric = col1.radio("Choose Metric", options=metric_options)
 
         if line_metric == "ESG Scores":
- 
+            # Get ESG scores
             esg_df["WHO"] = company.title()
             ind_esg_df["WHO"] = "Industry Average"
             esg_plot_df = pd.concat([esg_df, ind_esg_df]
@@ -220,6 +233,8 @@ def main(start_data, end_data):
         ).interactive()
         col2.altair_chart(metric_chart, use_container_width=True)
 
+
+        ###### CHART: ESG RADAR ######
         col1, col2 = st.beta_columns((1, 2))
         avg_esg = data["ESG"]
         avg_esg.rename(columns={"Unnamed: 0": "Type"}, inplace=True)
@@ -253,6 +268,9 @@ def main(start_data, end_data):
         radar.update_layout(showlegend=False)
         col1.plotly_chart(radar, use_container_width=True)
 
+
+        ###### CHART: DOCUMENT TONE DISTRIBUTION #####
+        # add overall average
         dist_chart = alt.Chart(df_company, title="Document Tone "
                                "Distribution").transform_density(
                 density='Tone',
@@ -270,6 +288,9 @@ def main(start_data, end_data):
         col2.markdown("### <br>", unsafe_allow_html=True)
         col2.altair_chart(dist_chart,use_container_width=True)
 
+
+        ###### CHART: SCATTER OF ARTICLES OVER TIME #####
+        # st.markdown("---")
         scatter = alt.Chart(df_company, title="Article Tone").mark_circle().encode(
             x="NegativeTone:Q",
             y="PositiveTone:Q",
@@ -287,10 +308,13 @@ def main(start_data, end_data):
         st.altair_chart(scatter, use_container_width=True)
 
 
+        ###### NUMBER OF NEIGHBORS TO FIND #####
         neighbor_cols = [f"n{i}_rec" for i in range(num_neighbors)]
         company_df = df_conn[df_conn.company == company]
         neighbors = company_df[neighbor_cols].iloc[0]
 
+
+        ###### CHART: 3D EMBEDDING WITH NEIGHBORS ######
         st.markdown("---")
         color_f = lambda f: f"Company: {company.title()}" if f == company else (
             "Connected Company" if f in neighbors.values else "Other Company")
@@ -319,6 +343,8 @@ def main(start_data, end_data):
                              )
         st.plotly_chart(fig_3d, use_container_width=True)
 
+
+        ###### CHART: NEIGHBOR SIMILIARITY ######
         st.markdown("---")
         neighbor_conf = pd.DataFrame({
             "Neighbor": neighbors,
@@ -355,8 +381,4 @@ if __name__ == "__main__":
     alt.themes.enable("default")
 
 
-
-
-
-
-
+# one_month, ten_days

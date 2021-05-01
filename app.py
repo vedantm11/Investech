@@ -62,6 +62,79 @@ def get_clickable_name(url):
         return f"[{title}]({url})"
     except:
         return f"[{url}]({url})"
-        
+
+
+def main(start_data, end_data):
+    #Theme
+    alt.themes.register("finastra", finastra_theme)
+    alt.themes.enable("finastra")
+    violet, fuchsia = ["#694ED6", "#C137A2"]
+
+    #Page setup
+    icon_path = os.path.join(".", "raw", "esg_ai_logo.png")
+    st.set_page_config(page_title="ESG AI", page_icon=icon_path,
+                       layout='centered', initial_sidebar_state="collapsed")
+    _, logo, _ = st.beta_columns(3)
+    logo.image(icon_path, width=200)
+    style = ("text-align:center; padding: 0px; font-family: arial black;, "
+             "font-size: 400%")
+    title = f"<h1 style='{style}'>ESG<sup>AI</sup></h1><br><br>"
+    st.write(title, unsafe_allow_html=True)
+
+    #Load data
+    with st.spinner(text="Fetching Data..."):
+        data, companies = load_data(start_data, end_data)
+    df_conn = data["conn"]
+    df_data = data["data"]
+    embeddings = data["embed"]
+
+    st.sidebar.title("Filter Options")
+    date_place = st.sidebar.empty()
+    esg_categories = st.sidebar.multiselect("Select News Categories",
+                                            ["E", "S", "G"], ["E", "S", "G"])
+    pub = st.sidebar.empty()
+    num_neighbors = st.sidebar.slider("Number of Connections", 1, 20, value=8)
+
+    #After company selection
+    company = st.selectbox("Select a Company to Analyze", companies)
+    if company and company != "Select a Company":
+        df_company = df_data[df_data.Organization == company]
+        diff_col = f"{company.replace(' ', '_')}_diff"
+        esg_keys = ["E_score", "S_score", "G_score"]
+        esg_df = get_melted_frame(data, esg_keys, keepcol=diff_col)
+        ind_esg_df = get_melted_frame(data, esg_keys, dropcol="industry_tone")
+        tone_df = get_melted_frame(data, ["overall_score"], keepcol=diff_col)
+        ind_tone_df = get_melted_frame(data, ["overall_score"],
+                                       dropcol="industry_tone")
+
+    company = st.selectbox("Select a Company to Analyze", companies)
+    if company and company != "Select a Company":
+        df_company = df_data[df_data.Organization == company]
+        diff_col = f"{company.replace(' ', '_')}_diff"
+        esg_keys = ["E_score", "S_score", "G_score"]
+        esg_df = get_melted_frame(data, esg_keys, keepcol=diff_col)
+        ind_esg_df = get_melted_frame(data, esg_keys, dropcol="industry_tone")
+        tone_df = get_melted_frame(data, ["overall_score"], keepcol=diff_col)
+        ind_tone_df = get_melted_frame(data, ["overall_score"],
+                                       dropcol="industry_tone")
+
+        #Date UI
+        start = df_company.DATE.min()
+        end = df_company.DATE.max()
+        selected_dates = date_place.date_input("Select a Date Range",
+            value=[start, end], min_value=start, max_value=end, key=None)
+        time.sleep(0.8)  
+        start, end = selected_dates
+        #Data filter
+        df_company = filter_company_data(df_company, esg_categories,
+                                         start, end)
+        esg_df = filter_on_date(esg_df, start, end)
+        ind_esg_df = filter_on_date(ind_esg_df, start, end)
+        tone_df = filter_on_date(tone_df, start, end)
+        ind_tone_df = filter_on_date(ind_tone_df, start, end)
+        date_filtered = filter_on_date(df_data, start, end)
+
+
+
 
 

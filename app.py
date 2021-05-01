@@ -43,4 +43,25 @@ def filter_on_date(df, start, end, date_col="DATE"):
             (df[date_col] <= pd.to_datetime(end))]
     return df
 
+def get_melted_frame(data_dict, frame_names, keepcol=None, dropcol=None):
+    if keepcol:
+        reduced = {k: df[keepcol].rename(k) for k, df in data_dict.items()
+                   if k in frame_names}
+    else:
+        reduced = {k: df.drop(columns=dropcol).mean(axis=1).rename(k)
+                   for k, df in data_dict.items() if k in frame_names}
+    df = (pd.concat(list(reduced.values()), axis=1).reset_index().melt("date")
+            .sort_values("date").ffill())
+    df.columns = ["DATE", "ESG", "Score"]
+    return df.reset_index(drop=True)
+
+def get_clickable_name(url):
+    try:
+        T = metadata_parser.MetadataParser(url=url, search_head_only=True)
+        title = T.metadata["og"]["title"].replace("|", " - ")
+        return f"[{title}]({url})"
+    except:
+        return f"[{url}]({url})"
+        
+
 
